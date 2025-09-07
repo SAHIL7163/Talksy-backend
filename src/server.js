@@ -6,11 +6,14 @@ import cors from 'cors';
 import authRoutes from './routers/auth.route.js';
 import userRoutes from './routers/user.route.js';
 import chatRoutes from './routers/chat.route.js';
-import { connectDB} from './lib/db.js';
+import { connectDB } from './lib/db.js';
 
 import { createServer } from "http";
 import { Server } from "socket.io";
 import socketHandler from './socket.js';
+
+import Redis from "ioredis";
+import { createAdapter } from "@socket.io/redis-adapter";
 
 const app = express();
 const PORT = process.env.PORT;
@@ -24,15 +27,23 @@ const io = new Server(httpServer, {
   },
 });
 
+
+const pubClient = new Redis(process.env.REDIS_URL);
+const subClient = pubClient.duplicate();
+
+io.adapter(createAdapter(pubClient, subClient));
+console.log("✅ Redis adapter connected");
+ 
+
 app.use(cors({
-    origin: process.env.CLIENT_URL,
-    credentials: true,
+  origin: process.env.CLIENT_URL,
+  credentials: true,
 }));
 app.use(express.json());
 app.use(cookieParser());
 
-app.use('/api/auth',authRoutes);
-app.use('/api/users',userRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api/chat', chatRoutes)
 
 app.set('io', io);
