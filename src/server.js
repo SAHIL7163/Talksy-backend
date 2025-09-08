@@ -36,7 +36,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/chat', chatRoutes)
 
-app.set('io', io);
 socketHandler(io);
 
 httpServer.listen(PORT, () => {
