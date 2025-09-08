@@ -1,28 +1,28 @@
 import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
 import jwt from 'jsonwebtoken';
+import { publisher } from '../pubsub.js';
 
 async function signup(req, res) {
-    const { fullName,email, password } = req.body;
+    const { fullName, email, password } = req.body;
 
-    try{
-        if(!fullName || !email || !password) {
+    try {
+        if (!fullName || !email || !password) {
             return res.status(400).json({ message: 'All fiels are required' });
         }
 
-        if(password.length < 6) {
+        if (password.length < 6) {
             return res.status(400).json({ message: 'Password must be at least 6 characters long' });
         }
 
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if(!emailRegex.test(email)) {
+        if (!emailRegex.test(email)) {
             return res.status(400).json({ message: 'Invalid email format' });
         }
-        
+
         const existingUser = await User.findOne({ email: email });
 
-        if(existingUser)
-        {
+        if (existingUser) {
             return res.status(400).json({ message: 'User with this email already exists' });
         }
         const genders = ["male", "female"];
@@ -44,36 +44,35 @@ async function signup(req, res) {
             { expiresIn: '7d' }
         );
 
-        res.cookie("jwt",token,{
-            maxAge : 7 *24 * 60 * 60 * 1000, // 7 days
+        res.cookie("jwt", token, {
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
             httpOnly: true, // prevent xss attacks
             secure: process.env.NODE_ENV === 'production', // use secure cookies in production
             sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax'
         })
 
-        res.status(201).json({success : true, user: newUser});
+        res.status(201).json({ success: true, user: newUser });
 
-    }catch(err)
-    {
-      console.log("error in signup controller:", err);
-      res.status(500).json({message : 'Internal Server Error'});
-    }   
+    } catch (err) {
+        console.log("error in signup controller:", err);
+        res.status(500).json({ message: 'Internal Server Error' });
+    }
 }
 
-async function login(req, res){
-    try{
+async function login(req, res) {
+    try {
         const { email, password } = req.body;
-        if(!email || !password) {
+        if (!email || !password) {
             return res.status(400).json({ message: 'Email and password are required' });
         }
 
         const user = await User.findOne({ email: email });
-        if(!user) {
+        if (!user) {
             return res.status(400).json({ message: 'Invalid email or password' });
         }
 
         const ispasswordMatch = await bcrypt.compare(password, user.password);
-        if(!ispasswordMatch) {
+        if (!ispasswordMatch) {
             return res.status(400).json({ message: 'Invalid  email or password' });
         }
 
@@ -83,22 +82,22 @@ async function login(req, res){
             { expiresIn: '7d' }
         );
 
-        res.cookie("jwt",token,{
-            maxAge : 7 *24 * 60 * 60 * 1000, // 7 days
+        res.cookie("jwt", token, {
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
             httpOnly: true, // prevent xss attacks
             secure: process.env.NODE_ENV === 'production', // use secure cookies in production
             sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax'
         })
 
-        res.status(200).json({success : true, user: user});    
+        res.status(200).json({ success: true, user: user });
     }
-    catch(err){
+    catch (err) {
         console.log("error in login controller:", err);
-        res.status(500).json({message : 'Internal Server Error'});
+        res.status(500).json({ message: 'Internal Server Error' });
     }
 }
 
-function logout(req, res){
+function logout(req, res) {
     res.clearCookie("jwt", {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
@@ -107,52 +106,53 @@ function logout(req, res){
     res.status(200).json({ success: true, message: 'Logged out successfully' });
 }
 
-async function onboard(req,res){
-    try{
+async function onboard(req, res) {
+    try {
         const userId = req.user._id;
-        const {fullName, bio, location} = req.body;
+        const { fullName, bio, location } = req.body;
 
-        if(!fullName || !bio || !location) {
+        if (!fullName || !bio || !location) {
             return res.status(400).json({
-            message: 'All fields are required' ,
-            missingFields : [
-                !fullName && "fullName",
-                !bio && "bio",
-                !location && "location"
-            ]
+                message: 'All fields are required',
+                missingFields: [
+                    !fullName && "fullName",
+                    !bio && "bio",
+                    !location && "location"
+                ]
             });
         }
 
         const updatedUser = await User.findByIdAndUpdate(
             userId,
             {
-            ...req.body,
-            isOnboarded: true,
-            },{ new: true }
+                ...req.body,
+                isOnboarded: true,
+            }, { new: true }
         );
 
-        if(!updatedUser) {
+        if (!updatedUser) {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        const io = req.app.get('io');
+        await publisher.publish(
+            "chat:global",
+            JSON.stringify({
+                type: "user:joined",
+                payload: {
+                    _id: updatedUser._id,
+                    fullName: updatedUser.fullName,
+                    profilePic: updatedUser.profilePic,
+                    location: updatedUser.location,
+                    bio: updatedUser.bio,
+                }
+            })
+        );
 
-        if(io){
-           io.emit("user:joined", {
-            _id : updatedUser._id,
-            fullName: updatedUser.fullName,
-            profilePic: updatedUser.profilePic,
-            location: updatedUser.location,
-            bio: updatedUser.bio,
-          });
-        }
-
-           
         return res.status(200).json({ success: true, user: updatedUser });
 
-    }catch(err){
+    } catch (err) {
         console.log("error in onboard controller:", err);
-        return res.status(500).json({message : 'Internal Server Error'});
+        return res.status(500).json({ message: 'Internal Server Error' });
     }
 }
 
@@ -160,7 +160,7 @@ async function getUserById(req, res) {
     try {
         const userId = req.params.id;
         const user = await User.findById(userId).select('-password');
-        
+
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
@@ -168,8 +168,8 @@ async function getUserById(req, res) {
         res.status(200).json({ success: true, user });
     } catch (error) {
         console.error("Error fetching user by ID:", error);
-        res.status(500).json({ message: 'Internal Server Error' }); 
+        res.status(500).json({ message: 'Internal Server Error' });
     }
 }
 
-export { signup, login, logout ,onboard, getUserById};
+export { signup, login, logout, onboard, getUserById };
