@@ -12,8 +12,6 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import socketHandler from './socket.js';
 
-import Redis from "ioredis";
-import { createAdapter } from "@socket.io/redis-adapter";
 
 const app = express();
 const PORT = process.env.PORT;
@@ -26,14 +24,6 @@ const io = new Server(httpServer, {
     credentials: true,
   },
 });
-
-
-const pubClient = new Redis(process.env.REDIS_URL);
-const subClient = pubClient.duplicate();
-
-io.adapter(createAdapter(pubClient, subClient));
-console.log("✅ Redis adapter connected");
- 
 
 app.use(cors({
   origin: process.env.CLIENT_URL,

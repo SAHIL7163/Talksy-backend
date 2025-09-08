@@ -2,11 +2,12 @@ import Message from './models/Message.js';
 import User from './models/User.js';
 import axios from 'axios';
 import mongoose from 'mongoose';
-
+import { publisher, subscriber } from './pubsub.js';
 
 export default function socketHandler(io) {
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
+
 
     socket.on("register", ({ userId }) => {
       if (!userId) return;
@@ -23,39 +24,71 @@ export default function socketHandler(io) {
     // Send Message
     socket.on("send_message", async ({ channelId, senderId, text, parentMessage }) => {
       try {
-        let message = await Message.create({ channelId, sender: senderId, text, parentMessage: parentMessage || null });
-        message = await message.populate("sender")
+        let message = await Message.create({
+          channelId,
+          sender: senderId,
+          text,
+          parentMessage: parentMessage || null,
+        });
+        message = await message.populate("sender");
 
         if (parentMessage) {
           message = await message.populate({
             path: "parentMessage",
-            populate: { path: "sender", select: "fullName profilePic" }
+            populate: { path: "sender", select: "fullName profilePic" },
           });
         }
+
         message = message.toObject();
 
-        io.to(channelId).emit("receive_message", message);
+        await publisher.publish(
+          `chat:${channelId}`,
+          JSON.stringify({ type: "receive_message", payload: message })
+        );
       } catch (error) {
         io.emit("error_message", { message: "Failed to send message" });
       }
     });
 
-    socket.on('message_read', ({ messageId, channelId }) => {
-      io.to(channelId).emit('message_read', { messageId });
+    // Mark message as read
+    socket.on("message_read", async ({ messageId, channelId }) => {
+      await publisher.publish(
+        `chat:${channelId}`,
+        JSON.stringify({ type: "message_read", payload: { messageId } })
+      );
     });
 
     // Typing Indicators
-    socket.on("typing", ({ channelId, userId }) => socket.to(channelId).emit("typing", userId));
-    socket.on("stop_typing", ({ channelId, userId }) => socket.to(channelId).emit("stop_typing", userId));
+    socket.on("typing", ({ channelId, userId }) =>
+      publisher.publish(
+        `chat:${channelId}`,
+        JSON.stringify({ type: "typing", payload: { userId } })
+      )
+    );
 
-    socket.on("start_video_call", ({ channelId }) => {
-      socket.to(channelId).emit("start_video_call", { channelId });
-    });
-    socket.on("end_video_call", ({ channelId }) => {
-      socket.to(channelId).emit("end_video_call", { channelId });
-    });
+    socket.on("stop_typing", ({ channelId, userId }) =>
+      publisher.publish(
+        `chat:${channelId}`,
+        JSON.stringify({ type: "stop_typing", payload: { userId } })
+      )
+    );
 
+    // Video Call Events
+    socket.on("start_video_call", ({ channelId }) =>
+      publisher.publish(
+        `chat:${channelId}`,
+        JSON.stringify({ type: "start_video_call", payload: { channelId } })
+      )
+    );
 
+    socket.on("end_video_call", ({ channelId }) =>
+      publisher.publish(
+        `chat:${channelId}`,
+        JSON.stringify({ type: "end_video_call", payload: { channelId } })
+      )
+    );
+
+    // AI Message
     socket.on("send_ai_message", async ({ channelId, senderId, text }) => {
       try {
         if (!text || !text.trim()) text = "[Empty message]";
@@ -83,14 +116,14 @@ export default function socketHandler(io) {
 
         const aiUserId = aiUser._id;
 
-        const history = recentMessages.reverse().map(msg => ({
+        const history = recentMessages.reverse().map((msg) => ({
           role: msg.sender.toString() === aiUserId.toString() ? "model" : "user",
           parts: [{ text: msg.text || "[Empty message]" }],
         }));
 
         const messagesForGemini = [
           ...history,
-          { role: "user", parts: [{ text }] }
+          { role: "user", parts: [{ text }] },
         ];
 
         const response = await axios.post(
@@ -109,19 +142,32 @@ export default function socketHandler(io) {
           text: aiResponse,
         });
 
-        io.to(channelId).emit("receive_ai_message", aiMessage);
-
+        await publisher.publish(
+          `chat:${channelId}`,
+          JSON.stringify({ type: "receive_ai_message", payload: aiMessage })
+        );
       } catch (error) {
         console.error("Error details:", error.response?.data || error.message);
 
         let errorMessage = "Failed to send AI message";
-        if (error.response?.status === 400) errorMessage = "Invalid request to AI model. Check message structure.";
-        else if (error.response?.status === 401 || error.response?.status === 403) errorMessage = "Authentication error. Check your API key.";
-        else if (error.response?.status === 404) errorMessage = "AI model not found.";
-        else if (error.response?.status === 429) errorMessage = "Rate limit exceeded. Wait and try again.";
-        else if (error.response?.status >= 500) errorMessage = "AI server error. Try again later.";
+        if (error.response?.status === 400)
+          errorMessage = "Invalid request to AI model. Check message structure.";
+        else if (
+          error.response?.status === 401 ||
+          error.response?.status === 403
+        )
+          errorMessage = "Authentication error. Check your API key.";
+        else if (error.response?.status === 404)
+          errorMessage = "AI model not found.";
+        else if (error.response?.status === 429)
+          errorMessage = "Rate limit exceeded. Wait and try again.";
+        else if (error.response?.status >= 500)
+          errorMessage = "AI server error. Try again later.";
 
-        io.to(channelId).emit("error_message", { message: errorMessage });
+        await publisher.publish(
+          `chat:${channelId}`,
+          JSON.stringify({ type: "error_message", payload: errorMessage })
+        );
       }
     });
 
@@ -130,4 +176,14 @@ export default function socketHandler(io) {
     });
   });
 
+  // Subscriber: listen to all chat channels
+  subscriber.pSubscribe("chat:*", (message, channel) => {
+    try {
+      const channelId = channel.split(":")[1];
+      const event = JSON.parse(message);
+      io.to(channelId).emit(event.type, event.payload);
+    } catch (err) {
+      console.error("Invalid message from Redis:", message, err);
+    }
+  });
 }
