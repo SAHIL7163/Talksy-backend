@@ -10,8 +10,11 @@ import { connectDB } from './lib/db.js';
 
 import { createServer } from "http";
 import { Server } from "socket.io";
-import socketHandler from './socket.js';
+import socketHandler from './lib/socket.js';
+// import { createTopics } from "./lib/kafka/admin.js";
 
+import { connectProducer } from './lib/kafka/producer.js';
+import { connectConsumer } from './lib/kafka/consumer.js';
 
 const app = express();
 const PORT = process.env.PORT;
@@ -41,4 +44,7 @@ socketHandler(io);
 httpServer.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
   connectDB();
+  // createTopics();
+  connectProducer();
+  connectConsumer();
 });

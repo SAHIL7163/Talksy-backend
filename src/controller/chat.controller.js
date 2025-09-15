@@ -1,6 +1,6 @@
 import Message from '../models/Message.js';
 import cloudinary from '../lib/cloudinary.js';
-import { publisher } from '../pubsub.js';
+import { publisher } from '../lib/pubsub.js';
 
 async function getChatMessages(req, res) {
   try {
@@ -28,7 +28,6 @@ async function deleteMessage(req, res) {
     }
 
     await Message.deleteOne({ _id: messageId });
-    console.log("message is deleted");
 
     // Publish delete event
     await publisher.publish(
@@ -86,6 +85,9 @@ async function editMessage(req, res) {
 async function MessageRead(req, res) {
   try {
     const { messageId } = req.params;
+
+    if(!messageId) return res.status(400).json({ error: 'Missing messageId' });
+
     const message = await Message.findById(messageId);
     if (!message) return res.status(404).json({ error: 'Message not found' });
 

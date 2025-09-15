@@ -1,6 +1,6 @@
 import FriendRequest from "../models/FriendRequest.js";
 import User from "../models/User.js";
-import { publisher } from "../pubsub.js";
+import { publisher } from "../lib/pubsub.js";
 
 async function getRecommendedUser(req, res) {
   try {

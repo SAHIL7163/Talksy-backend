@@ -1,53 +1,108 @@
-import Message from './models/Message.js';
-import User from './models/User.js';
+import { v4 as uuidv4 } from "uuid";
+
+import Message from '../models/Message.js';
+import User from '../models/User.js';
 import axios from 'axios';
 import mongoose from 'mongoose';
 import { publisher, subscriber } from './pubsub.js';
+import { producer } from './kafka/producer.js';
 
 export default function socketHandler(io) {
   io.on("connection", (socket) => {
-    console.log("User connected:", socket.id);
-
 
     socket.on("register", ({ userId }) => {
       if (!userId) return;
       socket.join(userId.toString());
-      console.log(`User ${userId} joined their personal room`);
     });
 
     // Join Chat Room
     socket.on("join_room", (channelId) => {
       socket.join(channelId);
-      console.log(`Socket ${socket.id} joined room ${channelId}`);
     });
 
     // Send Message
-    socket.on("send_message", async ({ channelId, senderId, text, parentMessage }) => {
+    socket.on("send_message", async (body) => {
       try {
-        let message = await Message.create({
+
+        const { channelId, sender, text, parentMessage, tempId, createdAt } = body;
+
+        const message = {
+          messageId: null,
+          tempId,
           channelId,
-          sender: senderId,
+          sender: sender,
           text,
-          parentMessage: parentMessage || null,
-        });
-        message = await message.populate("sender");
-
-        if (parentMessage) {
-          message = await message.populate({
-            path: "parentMessage",
-            populate: { path: "sender", select: "fullName profilePic" },
-          });
-        }
-
-        message = message.toObject();
+          parentMessage: parentMessage && parentMessage !== "undefined" ? parentMessage : null,
+          createdAt: createdAt,
+        };
 
         await publisher.publish(
           `chat:${channelId}`,
           JSON.stringify({ type: "receive_message", payload: message })
         );
+
+        await producer.send({
+          topic: "chat-messages",
+          messages: [
+            {
+              key: channelId.toString(),
+              value: JSON.stringify({
+                type: "send_message",
+                payload: message,
+              }),
+            },
+          ],
+        });
+
+        console.log("Message sent to Kafka topic 'chat-messages'");
       } catch (error) {
         io.emit("error_message", { message: "Failed to send message" });
       }
+    });
+   
+    // Delete Message
+    socket.on("delete_message", async ({ messageId, channelId }) => {
+      console.log("Delete message event received for ID:", messageId);
+      await publisher.publish(
+        `chat:${channelId}`,
+        JSON.stringify({ type: "message_deleted", payload: { messageId } })
+      );
+
+      await producer.send({
+        topic: "chat-messages",
+        messages: [
+          {
+            key: channelId.toString(),
+            value: JSON.stringify({
+              type: "message_deleted",
+              payload: { messageId, channelId },
+            }),
+          },
+        ],
+      });
+    });
+
+    // Edit Message
+    socket.on("edit_message", async ({ messageId, channelId, text }) => {
+      await publisher.publish(
+        `chat:${channelId}`,
+        JSON.stringify({ type: "message_edited", payload: { messageId, text } })
+      );
+
+
+      await producer.send({
+        topic: "chat-messages",
+        messages: [
+          {
+            key: channelId.toString(),
+            value: JSON.stringify({
+              type: "message_edited",
+              payload: { messageId, text },
+            }),
+          },
+        ],
+      });
+
     });
 
     // Mark message as read
@@ -56,6 +111,20 @@ export default function socketHandler(io) {
         `chat:${channelId}`,
         JSON.stringify({ type: "message_read", payload: { messageId } })
       );
+
+      await producer.send({
+        topic: "chat-messages",
+        messages: [
+          {
+            key: channelId.toString(),
+            value: JSON.stringify({
+              type: "message_read",
+              payload: { messageId },
+            }),
+
+          },
+        ],
+      });
     });
 
     // Typing Indicators
@@ -65,6 +134,7 @@ export default function socketHandler(io) {
         JSON.stringify({ type: "typing", payload: { userId } })
       )
     );
+
 
     socket.on("stop_typing", ({ channelId, userId }) =>
       publisher.publish(

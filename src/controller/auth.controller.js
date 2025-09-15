@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
 import jwt from 'jsonwebtoken';
-import { publisher } from '../pubsub.js';
+import { publisher } from '../lib/pubsub.js';
 
 async function signup(req, res) {
     const { fullName, email, password } = req.body;
