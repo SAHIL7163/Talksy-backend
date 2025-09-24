@@ -1,5 +1,3 @@
-import { v4 as uuidv4 } from "uuid";
-
 import Message from '../models/Message.js';
 import User from '../models/User.js';
 import axios from 'axios';
@@ -24,7 +22,7 @@ export default function socketHandler(io) {
     socket.on("send_message", async (body) => {
       try {
 
-        const { channelId, sender, text, parentMessage, tempId, createdAt } = body;
+        const { channelId, sender, text, parentMessage, tempId, createdAt, file } = body;
 
         const message = {
           messageId: null,
@@ -34,6 +32,7 @@ export default function socketHandler(io) {
           text,
           parentMessage: parentMessage && parentMessage !== "undefined" ? parentMessage : null,
           createdAt: createdAt,
+          file
         };
 
         await publisher.publish(
@@ -59,7 +58,7 @@ export default function socketHandler(io) {
         io.emit("error_message", { message: "Failed to send message" });
       }
     });
-   
+
     // Delete Message
     socket.on("delete_message", async ({ messageId, channelId }) => {
       console.log("Delete message event received for ID:", messageId);
