@@ -23,6 +23,7 @@ export const connectConsumer = async () => {
               text: payload.text,
               parentMessage: payload.parentMessage ? payload.parentMessage._id : null,
               createdAt: payload.createdAt,
+              file: payload.file,
             });
 
             savedMessage = await savedMessage.populate("sender", "fullName profilePic");
@@ -41,25 +42,25 @@ export const connectConsumer = async () => {
               `chat:${payload.channelId}`,
               JSON.stringify({ type: "receive_message", payload: messageToSend })
             );
-          } 
+          }
           else if (type === "message_deleted") {
             await Message.deleteOne({ _id: payload.messageId });
-          } 
+          }
           else if (type === "message_edited") {
             await Message.findByIdAndUpdate(
               payload.messageId,
               { text: payload.text, isEdited: true },
               { new: true }
             )
-        
-          } 
+
+          }
           else if (type === "message_read") {
             const msg = await Message.findById(payload.messageId);
             if (msg) {
               msg.isRead = true;
               await msg.save();
             }
-          } 
+          }
           else {
             console.warn("Unknown Kafka event type:", type);
           }

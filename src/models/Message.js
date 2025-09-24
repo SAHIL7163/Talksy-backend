@@ -13,7 +13,8 @@ const messageSchema = new mongoose.Schema({
   file: {
     url: { type: String, required: false },
     type: { type: String, required: false },
-  }, 
+    name: { type: String, required: false },
+  },
   isRead: { type: Boolean, default: false },
   isEdited: { type: Boolean, default: false },
   parentMessage: { type: mongoose.Schema.Types.ObjectId, ref: "Message", default: null },
