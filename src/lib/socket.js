@@ -1,13 +1,12 @@
-import Message from '../models/Message.js';
-import User from '../models/User.js';
-import axios from 'axios';
-import mongoose from 'mongoose';
-import { publisher, subscriber } from './pubsub.js';
-import { producer } from './kafka/producer.js';
+import Message from "../models/Message.js";
+import User from "../models/User.js";
+import axios from "axios";
+import mongoose from "mongoose";
+import { publisher, subscriber } from "./pubsub.js";
+import { producer } from "./kafka/producer.js";
 
 export default function socketHandler(io) {
   io.on("connection", (socket) => {
-
     socket.on("register", ({ userId }) => {
       if (!userId) return;
       socket.join(userId.toString());
@@ -21,8 +20,15 @@ export default function socketHandler(io) {
     // Send Message
     socket.on("send_message", async (body) => {
       try {
-
-        const { channelId, sender, text, parentMessage, tempId, createdAt, file } = body;
+        const {
+          channelId,
+          sender,
+          text,
+          parentMessage,
+          tempId,
+          createdAt,
+          file,
+        } = body;
 
         const message = {
           messageId: null,
@@ -30,9 +36,12 @@ export default function socketHandler(io) {
           channelId,
           sender: sender,
           text,
-          parentMessage: parentMessage && parentMessage !== "undefined" ? parentMessage : null,
+          parentMessage:
+            parentMessage && parentMessage !== "undefined"
+              ? parentMessage
+              : null,
           createdAt: createdAt,
-          file
+          file,
         };
 
         await publisher.publish(
@@ -88,7 +97,6 @@ export default function socketHandler(io) {
         JSON.stringify({ type: "message_edited", payload: { messageId, text } })
       );
 
-
       await producer.send({
         topic: "chat-messages",
         messages: [
@@ -101,7 +109,6 @@ export default function socketHandler(io) {
           },
         ],
       });
-
     });
 
     // Mark message as read
@@ -120,7 +127,6 @@ export default function socketHandler(io) {
               type: "message_read",
               payload: { messageId },
             }),
-
           },
         ],
       });
@@ -133,7 +139,6 @@ export default function socketHandler(io) {
         JSON.stringify({ type: "typing", payload: { userId } })
       )
     );
-
 
     socket.on("stop_typing", ({ channelId, userId }) =>
       publisher.publish(
@@ -179,14 +184,15 @@ export default function socketHandler(io) {
           aiUser = await User.create({
             fullName: "AI",
             email: "ai@example.com",
-            password: new mongoose.Types.ObjectId().toString(), // temporary password
+            password: new mongoose.Types.ObjectId().toString(),
           });
         }
 
         const aiUserId = aiUser._id;
 
         const history = recentMessages.reverse().map((msg) => ({
-          role: msg.sender.toString() === aiUserId.toString() ? "model" : "user",
+          role:
+            msg.sender.toString() === aiUserId.toString() ? "model" : "user",
           parts: [{ text: msg.text || "[Empty message]" }],
         }));
 
@@ -195,8 +201,12 @@ export default function socketHandler(io) {
           { role: "user", parts: [{ text }] },
         ];
 
+        const GEMINI_MODEL = "gemini-2.5-flash";
+        const GEMINI_API_VERSION = "v1";
+        const GEMINI_URL = `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+
         const response = await axios.post(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          GEMINI_URL,
           { contents: messagesForGemini },
           { headers: { "Content-Type": "application/json" } }
         );
@@ -219,15 +229,17 @@ export default function socketHandler(io) {
         console.error("Error details:", error.response?.data || error.message);
 
         let errorMessage = "Failed to send AI message";
+
         if (error.response?.status === 400)
-          errorMessage = "Invalid request to AI model. Check message structure.";
+          errorMessage =
+            "Invalid request to AI model. Check message structure.";
         else if (
           error.response?.status === 401 ||
           error.response?.status === 403
         )
           errorMessage = "Authentication error. Check your API key.";
         else if (error.response?.status === 404)
-          errorMessage = "AI model not found.";
+          errorMessage = "AI model not found. Try using the v1 endpoint.";
         else if (error.response?.status === 429)
           errorMessage = "Rate limit exceeded. Wait and try again.";
         else if (error.response?.status >= 500)
@@ -262,5 +274,4 @@ export default function socketHandler(io) {
       console.error("Invalid message from Redis:", message, err);
     }
   });
-
 }
